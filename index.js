@@ -839,7 +839,16 @@ FileStorage.prototype.read_header = function(id, fnCallback) {
 
 	return self;
 };
-
+/*
+	Get all file names object parsed
+	@fnCallback {Function} :: params: @err {Error}, @arr {Object Array}
+	return {FileStorage}
+*/
+FileStorage.prototype.list = function(fnCallback) {
+	return this.listing(function(err, arr){
+		fnCallback(err, arr.map(str => JSON.parse(str)))
+	});
+}
 /*
 	Get all file names
 	@fnCallback {Function} :: params: @err {Error}, @arr {String Array}
@@ -860,6 +869,7 @@ FileStorage.prototype.listing = function(fnCallback) {
 		var filename = directory.shift();
 
 		if (typeof(filename) === UNDEFINED) {
+			builder = builder.flatMap(str => str.split('\n'));
 			self.emit('listing', builder);
 			fnCallback(null, builder);
 			return;
@@ -1040,4 +1050,8 @@ exports.create = function(path, shouldIncludeDirSupport) {
 	var storage = new FileStorage(path, shouldIncludeDirSupport);
 	storage.on('error', function() {});
 	return storage;
+};
+
+Array.prototype.flatMap = function(lambda) {
+	return Array.prototype.concat.apply([], this.map(lambda));
 };

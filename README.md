@@ -342,6 +342,22 @@ storage.listing(function(err, arr) {
 
 });
 
+/*
+	Get all file names object parsed
+	@fnCallback {Function} :: params: @err {Error}, @arr {Object Array}
+	return {FileStorage}
+*/
+storage.list(fnCallback);
+
+// EXAMPLE:
+
+storage.list(function(err, arr) {
+
+	// Array contains Objects
+	console.log(arr);
+
+});
+
 // ================================================
 // FILESTORAGE CHANGELOG
 // ================================================
