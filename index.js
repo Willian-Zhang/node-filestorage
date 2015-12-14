@@ -10,7 +10,9 @@ var events = require('events');
 var LENGTH_DIRECTORY = 9;
 var LENGTH_HEADER = 2048;
 var FILENAME_DB = 'config';
+var DIR_DB = 'dirs';
 var FILENAME_CHANGELOG = 'changelog.log';
+var DIR_PREFIX = 'dir-';
 var EXTENSION = '.data';
 var EXTENSION_TMP = '.tmp';
 var UNDEFINED = 'undefined';
@@ -24,9 +26,14 @@ var NEWLINE = '\r\n';
 var NOTFOUND = '404: File not found.';
 var BOUNDARY = '----' + Math.random().toString(16).substring(2);
 
-function FileStorage(directory) {
+function FileStorage(directory, shouldIncludeDirSupport) {
 
 	this.path = (directory || path.join(path.dirname(process.argv[1]), 'filestorage')).replace(/\\/g, '/');
+	this.didIncludeDirSupport = shouldIncludeDirSupport || false;
+
+	if( this.didIncludeDirSupport ){
+		this.dirs= {};
+	}
 	this.cache = {};
 	this.options = {
 		index: 0,
@@ -74,6 +81,21 @@ FileStorage.prototype._load = function() {
 
 	options.index = config.index;
 	options.count = config.count;
+
+	if(self.didIncludeDirSupport){
+
+		var dirs = self.dirs;
+		var dirsPath = path.join(self.path, DIR_DB);
+
+		if (!fs.existsSync(dirsPath))
+			return self;
+
+		var dirJson = fs.readFileSync(dirsPath, ENCODING).toString();
+		if (dirJson.length === 0)
+			return self;
+
+		dirs = JSON.parse(dirJson);
+	}
 
 	return self;
 };
@@ -202,7 +224,7 @@ FileStorage.prototype._writeHeader = function(id, filename, header, fnCallback, 
 				if (fnCallback)
 					fnCallback(null, id, header);
 
-				self._append(directory, header, id.toString(), type);
+				self._append(directory, header, id.toString(), type);console.log(directory);
 				self.emit(type, id, header);
 			});
 		});
@@ -308,6 +330,7 @@ FileStorage.prototype.insert = function(name, buffer, custom, fnCallback, change
 		width: 0,
 		height: 0,
 		length: 0,
+		isDir: false,
 		custom: custom
 	};
 
@@ -396,7 +419,124 @@ FileStorage.prototype.insert = function(name, buffer, custom, fnCallback, change
 
 	return index;
 };
+/*
+	Create a directory
+	@name {String}
+	@pathToDir {String, null}
+	@custom {String, Object} :: optional
+	@fnCallback {Function} :: optional, params: @err {Error}, @id {Number}, @stat {Object}
+	@change {String} :: optional, changelog
+	return {Number} :: file id
+*/
+FileStorage.prototype.createDir = function(name, pathToDir, custom, fnCallback, change) {
 
+	var self = this;
+	var options = self.options;
+
+	if(	!self.didIncludeDirSupport ){
+		fnCallback(new Error('Dir Support not enabled'));
+		return null;
+	}
+
+	if(pathToDir === null || pathToDir === '' || pathToDir === './')
+		return self._create_dir_here(name, custom, fnCallback, change);
+
+	if( !self._verify_path_existence(pathToDir) ){
+		fnCallback(new Error('path to the dir to create does not exist.'));
+		return null;
+	}
+
+	var dirComponents = pathToVerify.split('/');
+	dirComponents.shift();
+
+	var directory = path.join(self.path, dirComponents.map(dir => DIR_PREFIX + dir).join('/'));
+	console.log(directory);
+	var storage = new FileStorage(directory);
+	var idOfThatStorage = storage._create_dir_here(name, custom, fnCallback, change);
+
+	return idOfThatStorage;
+};
+
+FileStorage.prototype._verify_path_existence = function(pathToVerify){
+
+	var self = this;
+
+	var dirComponents = pathToVerify.split('/');
+  dirComponents.shift();
+	var thisDirObject = self.dirs;
+	var thisComponent;
+
+  while( dirComponents.length > 0 ){
+    thisComponent = dirComponents.shift();
+
+		if( !thisDirObject.hasOwnProperty(thisComponent) )
+			return false;
+
+		thisDirObject = thisDirObject[thisComponent];
+  }
+	return true;
+};
+
+FileStorage.prototype._create_dir_here = function(name, custom, fnCallback, change) {
+
+	var self = this;
+	var options = self.options;
+
+	if (typeof(custom) === 'function') {
+		change = fnCallback;
+		fnCallback = custom;
+		custom = undefined;
+	}
+
+	var directory = path.join(self.path, DIR_PREFIX + name);
+
+	if( fs.existsSync(directory) ){
+		fnCallback(new Error('Dir exists!'));
+		return null;
+	}
+
+
+	var index = 0;
+	var eventname = 'update';
+
+	//if (typeof(id) === UNDEFINED) {
+		options.index++;
+		index = options.index;
+		eventname = 'insert';
+		options.count++;
+	//} else
+		//index = utils.parseIndex(id);
+
+	if (change)
+		self._append_changelog(index, change);
+
+	self._mkdir(directory, true);
+
+	name = path.basename(name);
+
+	self._save();
+
+	var ext = utils.extension(name);
+	var header = {
+		name: name,
+		type: 'application/directory',
+		length: 0,
+		isDir: true,
+		custom: custom
+	};
+
+	var virtualDir = self._directory(index);
+	var virtualFilename = virtualDir + '/' + index.toString().padLeft(LENGTH_DIRECTORY, '0');
+	var stream = fs.createWriteStream(virtualFilename + EXTENSION_TMP);
+
+	stream.on('finish', function() {
+		console.log('finish');
+		self._writeHeader(index, virtualFilename, header, fnCallback, eventname, virtualDir);
+	});
+	stream.end();
+
+	return index;
+};
 /*
 	Update a file
 	@id {String or Number}
@@ -896,8 +1036,8 @@ FileStorage.prototype.changelog = function(fnCallback) {
 	return self;
 };
 
-exports.create = function(path) {
-	var storage = new FileStorage(path);
+exports.create = function(path, shouldIncludeDirSupport) {
+	var storage = new FileStorage(path, shouldIncludeDirSupport);
 	storage.on('error', function() {});
 	return storage;
 };
